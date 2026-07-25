@@ -167,6 +167,23 @@ if "scenario_params" not in st.session_state:
         "cape_delay_days": 3
     }
 
+
+# --- Safe Secrets Loader (Cloud & Local) ---
+def get_secret(key_name: str, default: str = "") -> str:
+    """Fetches secrets from Streamlit Cloud Secrets or local environment variables."""
+    try:
+        if hasattr(st, "secrets") and key_name in st.secrets:
+            return str(st.secrets[key_name]).strip()
+    except Exception:
+        pass
+    return os.getenv(key_name, default).strip()
+
+
+eia_api_key = get_secret("EIA_API_KEY")
+gemini_api_key = get_secret("GEMINI_API_KEY")
+
+
+# --- Telemetry Data Ingestion ---
 @st.cache_data(ttl=900, show_spinner=False)
 def load_telemetry_data(eia_key: str):
     crude_data = fetch_crude_prices(api_key=eia_key)
@@ -174,8 +191,6 @@ def load_telemetry_data(eia_key: str):
     gdelt_data = fetch_geopolitical_signals()
     return crude_data, spr_data, gdelt_data
 
-eia_api_key = os.getenv("EIA_API_KEY", "")
-gemini_api_key = os.getenv("GEMINI_API_KEY", "")
 
 crude_df, spr_df, gdelt_df = load_telemetry_data(eia_api_key)
 

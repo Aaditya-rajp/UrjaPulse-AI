@@ -1,7 +1,7 @@
 """
 UrjaPulse AI — Master Streamlit Command Center
-Assembles Telemetry, Scenario Physics, Prophet Forecasting, Geospatial Intelligence,
-and 3-Node Gemini Multi-Agent Advisory into an executive dark command dashboard.
+Executes the high-density dark command UI with locked tab-indicator alignment,
+centered column headers, and sanitized HTML table rendering.
 """
 
 import os
@@ -38,7 +38,7 @@ st.set_page_config(
 
 load_dotenv()
 
-# --- Custom Styling: High-Density Dark Command Styling ---
+# --- Custom Styling: High-Density Dark Command Styling & QA Alignment Fixes ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
@@ -87,24 +87,34 @@ st.markdown("""
     .kpi-sub-green { font-size: 10px; color: #10B981; font-weight: 600; }
     .kpi-sub-red { font-size: 10px; color: #EF4444; font-weight: 600; }
 
-    /* Custom Navigation Tabs */
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: 1px solid #1E222D; padding-bottom: 6px; }
+    /* --- TAB ALIGNMENT FIX --- */
+    /* Remove tab-list gap to keep BaseWeb indicator offset calculations pixel-perfect */
+    .stTabs [data-baseweb="tab-list"] { 
+        border-bottom: 1px solid #1E222D; 
+        padding-bottom: 0px;
+    }
     .stTabs [data-baseweb="tab"] {
-        height: 36px;
+        height: 38px;
         background-color: #12141A;
         border: 1px solid #1E222D;
-        border-radius: 6px;
+        border-bottom: none;
+        border-radius: 6px 6px 0 0;
         color: #94A3B8;
         font-family: 'JetBrains Mono', monospace;
         font-size: 11px;
         font-weight: 600;
-        padding: 0 14px;
+        padding: 0 16px;
+        margin-right: 6px; /* Replaces gap rule to prevent highlight offset dislocation */
     }
     .stTabs [aria-selected="true"] {
         background-color: #F97316 !important;
         color: #0A0B0E !important;
         border-color: #F97316 !important;
         box-shadow: 0 0 10px rgba(249, 115, 22, 0.4);
+    }
+    /* Lock indicator line color to accent orange */
+    .stTabs [data-baseweb="tab-highlight"] {
+        background-color: #F97316 !important;
     }
 
     /* Node Multi-Agent Advisory Cards */
@@ -168,7 +178,7 @@ if "scenario_params" not in st.session_state:
     }
 
 
-# --- Safe Secrets Loader (Cloud & Local) ---
+# --- Safe Secrets Loader ---
 def get_secret(key_name: str, default: str = "") -> str:
     """Fetches secrets from Streamlit Cloud Secrets or local environment variables."""
     try:
@@ -308,8 +318,8 @@ def show_board_report_modal():
         st.rerun()
 
 
-# --- Header Bar ---
-h_col1, h_col2 = st.columns([4, 1])
+# --- Header Bar (Vertically Centered Alignment Fix) ---
+h_col1, h_col2 = st.columns([4, 1], vertical_alignment="center")
 with h_col1:
     st.title("🛢️ UrjaPulse AI")
     st.caption("AI-Driven Energy Supply Chain Resilience Platform — ET AI Hackathon 2026")

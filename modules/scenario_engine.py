@@ -86,9 +86,14 @@ def generate_supplier_reranking_matrix(
     freight_surcharge_pct: float,
     corridor_risk_score: float
 ) -> pd.DataFrame:
-    """Generates dynamic supplier reranking based on active risk level."""
+    """Generates dynamic supplier reranking with individual route-level risk scores."""
     surcharge_multiplier = 1.0 + (freight_surcharge_pct / 100.0)
     
+    # Calculate route-specific risk scores based on physical chokepoint exposure
+    ras_tanura_risk = round(corridor_risk_score, 1)                             # 100% exposed to Hormuz
+    fujairah_risk = round(max(10.0, corridor_risk_score * 0.35), 1)            # Partially bypasses Hormuz (-65% risk)
+    santos_risk = round(max(5.0, corridor_risk_score * 0.15), 1)              # Bypasses Middle East completely (-85% risk)
+
     suppliers = [
         {
             "rank": 1 if corridor_risk_score > 50 else 2,
@@ -97,7 +102,8 @@ def generate_supplier_reranking_matrix(
             "transit_days": "12 - 14 Days",
             "landed_cost": f"${(current_brent + 2.40) * surcharge_multiplier:.2f}/bbl",
             "compatibility": "96% High Match",
-            "risk_reduction": "-68% Risk Offload",
+            "risk_score": f"{fujairah_risk} / 100",
+            "risk_reduction": f"-{round(100 - (fujairah_risk / max(1.0, ras_tanura_risk) * 100))}% Offload",
             "status": "PRIMARY ALTERNATE"
         },
         {
@@ -107,7 +113,8 @@ def generate_supplier_reranking_matrix(
             "transit_days": "22 - 25 Days",
             "landed_cost": f"${(current_brent + 1.10) * surcharge_multiplier:.2f}/bbl",
             "compatibility": "88% Medium Match",
-            "risk_reduction": "-85% Risk Offload",
+            "risk_score": f"{santos_risk} / 100",
+            "risk_reduction": f"-{round(100 - (santos_risk / max(1.0, ras_tanura_risk) * 100))}% Offload",
             "status": "SECONDARY ROUTE"
         },
         {
@@ -117,7 +124,8 @@ def generate_supplier_reranking_matrix(
             "transit_days": "4 - 6 Days",
             "landed_cost": f"${current_brent:.2f}/bbl",
             "compatibility": "100% Exact Match",
-            "risk_reduction": "0% (Chokepoint Exposed)",
+            "risk_score": f"{ras_tanura_risk} / 100",
+            "risk_reduction": "0% (Fully Exposed)",
             "status": "HEDGE ONLY"
         }
     ]

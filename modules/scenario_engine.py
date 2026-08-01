@@ -1,92 +1,79 @@
 """
-UrjaPulse AI — Disruption Impact Scenario Engine
-Computes supply cascade physics and dynamically calculates color-coded step card severity.
+Scenario Engine — Physics & Mathematical Simulation Engine
+Calculates dynamic risk scores, disruption cascades, SPR cover, and supplier reranking.
 """
 
-from typing import Dict, Any
-import numpy as np
 import pandas as pd
-
-from data.industrial_registry import CHOKEPOINTS, ALTERNATE_SUPPLY_ORIGINS
 
 
 def calculate_corridor_risk_score(
-    goldstein_scale: float,
-    price_volatility_7d: float,
-    base_weight_goldstein: float = 0.6,
-    base_weight_volatility: float = 0.4
+    avg_goldstein: float, 
+    volatility: float, 
+    hormuz_pct: float = 0.0, 
+    red_sea_pct: float = 0.0
 ) -> float:
-    """Computes a clamped Corridor Risk Score (0 to 100)."""
-    normalized_goldstein_risk = np.clip((5.0 - goldstein_scale) * 6.67, 0.0, 100.0)
-    normalized_volatility_risk = np.clip(price_volatility_7d * 2000.0, 0.0, 100.0)
-
-    raw_score = (base_weight_goldstein * normalized_goldstein_risk) + (
-        base_weight_volatility * normalized_volatility_risk
-    )
-    return float(np.round(np.clip(raw_score, 0.0, 100.0), 1))
+    """
+    Calculates dynamic corridor risk score (0-100) combining GDELT conflict scale,
+    price volatility, and active scenario blockade sliders.
+    """
+    # Base GDELT risk: Goldstein scale ranges from -10 (conflict) to +10 (cooperation)
+    base_risk = max(0.0, min(100.0, (5.0 - avg_goldstein) * 5.0))
+    volatility_boost = min(20.0, volatility * 500.0)
+    
+    # Dynamic scenario slider impact
+    scenario_boost = (hormuz_pct * 0.40) + (red_sea_pct * 0.20)
+    
+    total_score = base_risk + volatility_boost + scenario_boost
+    return round(max(5.0, min(99.9, total_score)), 1)
 
 
 def run_disruption_cascade_simulation(
     brent_spot: float,
     spr_stock_mbbl: float,
     corridor_risk_score: float,
-    hormuz_blockade_pct: float = 45.0,
-    red_sea_reroute_pct: float = 30.0,
-    spr_drawdown_mbpd: float = 1.8,
-    elasticity_beta: float = 0.14,
-    freight_surcharge_pct: float = 25.0,
-    cape_delay_days: int = 3,
-    india_daily_import_mbpd: float = 4.6,
-    india_daily_consumption_mbpd: float = 5.2
-) -> Dict[str, Any]:
-    """Simulates supply cascades, SPR depletion, price surges, and macro economic deficits."""
+    hormuz_blockade_pct: float,
+    red_sea_reroute_pct: float,
+    spr_drawdown_mbpd: float,
+    elasticity_beta: float,
+    freight_surcharge_pct: float,
+    cape_delay_days: int
+) -> dict:
+    """Calculates volume at risk, dynamic SPR depletion, price surges, and daily trade loss."""
+    base_import_mbpd = 4.6  # Baseline daily crude import volume
+    
     # 1. Volume at Risk
-    hormuz_share = CHOKEPOINTS["Strait_of_Hormuz"]["share_of_india_imports"]
-    red_sea_share = CHOKEPOINTS["Bab_el_Mandeb"]["share_of_india_imports"]
+    hormuz_vol = base_import_mbpd * 0.50 * (hormuz_blockade_pct / 100.0)
+    red_sea_vol = base_import_mbpd * 0.15 * (red_sea_reroute_pct / 100.0)
+    volume_at_risk = round(hormuz_vol + red_sea_vol, 2)
+    pct_at_risk = round((volume_at_risk / base_import_mbpd) * 100.0, 1)
 
-    blocked_hormuz_mbpd = india_daily_import_mbpd * hormuz_share * (hormuz_blockade_pct / 100.0)
-    rerouted_red_sea_mbpd = india_daily_import_mbpd * red_sea_share * (red_sea_reroute_pct / 100.0)
-
-    total_volume_at_risk_mbpd = blocked_hormuz_mbpd + (rerouted_red_sea_mbpd * 0.15)
-    pct_total_imports_at_risk = (total_volume_at_risk_mbpd / india_daily_import_mbpd) * 100.0
-
-    # 2. SPR Days-of-Cover
-    effective_spr = min(spr_stock_mbbl, 48.0) if spr_stock_mbbl > 100 else spr_stock_mbbl
-    net_daily_deficit_mbpd = max(0.0, blocked_hormuz_mbpd - spr_drawdown_mbpd)
-    
-    if net_daily_deficit_mbpd > 0:
-        depleted_cover_days = max(1.0, effective_spr / (india_daily_consumption_mbpd * (1.0 + (net_daily_deficit_mbpd / india_daily_import_mbpd))))
-        depletion_rate_pct_day = (net_daily_deficit_mbpd / effective_spr) * 100.0
+    # 2. Dynamic SPR Days of Cover
+    net_daily_deficit = max(0.05, volume_at_risk - spr_drawdown_mbpd)
+    if volume_at_risk <= 0:
+        spr_days = 74.0  # Baseline static buffer
     else:
-        depleted_cover_days = effective_spr / india_daily_consumption_mbpd
-        depletion_rate_pct_day = 0.0
+        spr_days = spr_stock_mbbl / net_daily_deficit
+    spr_days_remaining = round(max(1.0, min(90.0, spr_days)), 1)
 
-    # 3. Price Impact Propagation
-    disruption_fraction = pct_total_imports_at_risk / 100.0
-    price_surge_pct = (disruption_fraction / elasticity_beta) * 100.0
-    freight_adder = brent_spot * (freight_surcharge_pct / 100.0) * 0.12
-    
-    projected_brent_price = brent_spot * (1.0 + (price_surge_pct / 100.0)) + freight_adder
-    price_delta_usd_bbl = projected_brent_price - brent_spot
+    # 3. Price Escalation Impact ($/bbl)
+    disruption_ratio = volume_at_risk / base_import_mbpd
+    price_delta = (disruption_ratio / max(0.01, elasticity_beta)) * 8.5 + (brent_spot * (freight_surcharge_pct / 100.0) * 0.15)
+    projected_brent = round(brent_spot + price_delta, 2)
 
-    # 4. Macro Economic Loss
-    baseline_daily_cost = india_daily_import_mbpd * 1_000_000 * brent_spot
-    projected_daily_cost = india_daily_import_mbpd * 1_000_000 * projected_brent_price
-    daily_macro_loss_million_usd = (projected_daily_cost - baseline_daily_cost) / 1_000_000.0
+    # 4. Daily Macro Deficit Loss ($M/day)
+    daily_trade_loss = round((volume_at_risk * projected_brent) + (base_import_mbpd * price_delta * 0.4), 1)
 
-    # Dynamic Severity Color Generators for Scenario Step Cards
-    spr_color = "#EF4444" if depleted_cover_days < 10.0 else "#F97316" if depleted_cover_days < 14.0 else "#10B981"
-    price_color = "#EF4444" if price_delta_usd_bbl > 10.0 else "#F97316" if price_delta_usd_bbl > 3.0 else "#10B981"
+    # Severity Colors
+    spr_color = "#EF4444" if spr_days_remaining < 14 else ("#F97316" if spr_days_remaining < 30 else "#10B981")
+    price_color = "#EF4444" if price_delta > 15 else ("#F97316" if price_delta > 5 else "#10B981")
 
     return {
-        "corridor_risk_score": corridor_risk_score,
-        "volume_at_risk_mbpd": round(total_volume_at_risk_mbpd, 2),
-        "pct_total_imports_at_risk": round(pct_total_imports_at_risk, 1),
-        "spr_days_of_cover_remaining": round(depleted_cover_days, 1),
-        "spr_depletion_rate_pct_day": round(depletion_rate_pct_day, 2),
-        "projected_brent_price": round(projected_brent_price, 2),
-        "price_delta_usd_bbl": round(price_delta_usd_bbl, 2),
-        "daily_macro_loss_million_usd": round(daily_macro_loss_million_usd, 2),
+        "volume_at_risk_mbpd": volume_at_risk,
+        "pct_total_imports_at_risk": pct_at_risk,
+        "spr_days_of_cover_remaining": spr_days_remaining,
+        "price_delta_usd_bbl": round(price_delta, 2),
+        "projected_brent_price": projected_brent,
+        "daily_macro_loss_million_usd": daily_trade_loss,
         "severity_colors": {
             "spr": spr_color,
             "price": price_color
@@ -99,66 +86,40 @@ def generate_supplier_reranking_matrix(
     freight_surcharge_pct: float,
     corridor_risk_score: float
 ) -> pd.DataFrame:
-    """Evaluates alternate supply hubs and outputs a ranked procurement matrix."""
-    matrix_rows = []
-
-    for key, hub in ALTERNATE_SUPPLY_ORIGINS.items():
-        base_freight = hub["freight_base_usd_bbl"]
-        surcharge_adder = base_freight * (freight_surcharge_pct / 100.0)
-        
-        if key == "Fujairah_UAE" and corridor_risk_score > 60:
-            extra_delay = 3
-            status = "PRIMARY ALTERNATE"
-            status_code = "PRIMARY_ALT"
-        elif key in ["US_Gulf_Coast", "Santos_Brazil"]:
-            extra_delay = 0
-            status = "SECONDARY ROUTE"
-            status_code = "SECONDARY"
-        elif key == "Bonny_Nigeria":
-            extra_delay = 2
-            status = "PRIMARY ALTERNATE"
-            status_code = "PRIMARY_ALT"
-        else:
-            extra_delay = 4
-            status = "HEDGE ONLY"
-            status_code = "HEDGE"
-
-        landed_cost = current_brent + base_freight + surcharge_adder
-        total_delay_days = hub["transit_days_base"] + extra_delay
-        
-        if key in ["US_Gulf_Coast", "Santos_Brazil"]:
-            risk_reduction_pct = 92.0
-            grade_compat_pct = "89%"
-        elif key == "Bonny_Nigeria":
-            risk_reduction_pct = 88.0
-            grade_compat_pct = "95%"
-        elif key == "Fujairah_UAE":
-            risk_reduction_pct = 62.0
-            grade_compat_pct = "92%"
-        elif key == "Primorsk_Russia":
-            risk_reduction_pct = 40.0
-            grade_compat_pct = "82%"
-        else:
-            risk_reduction_pct = 15.0
-            grade_compat_pct = "98%"
-
-        matrix_rows.append({
-            "rank": 0,
-            "supplier_hub": hub["name"],
-            "region": "International",
-            "grade": hub["grade_compat"],
-            "transit_days": f"{total_delay_days}d (+{extra_delay}d)",
-            "landed_cost": f"${landed_cost:.2f}/bbl",
-            "compatibility": grade_compat_pct,
-            "risk_reduction": f"-{risk_reduction_pct:.0f}%",
-            "status": status,
-            "status_code": status_code,
-            "sort_cost": landed_cost,
-            "sort_risk": risk_reduction_pct
-        })
-
-    df = pd.DataFrame(matrix_rows)
-    df = df.sort_values(by=["sort_risk", "sort_cost"], ascending=[False, True]).reset_index(drop=True)
-    df["rank"] = [f"#{i+1}" for i in range(len(df))]
+    """Generates dynamic supplier reranking based on active risk level."""
+    surcharge_multiplier = 1.0 + (freight_surcharge_pct / 100.0)
     
-    return df[["rank", "supplier_hub", "region", "grade", "transit_days", "landed_cost", "compatibility", "risk_reduction", "status", "status_code"]]
+    suppliers = [
+        {
+            "rank": 1 if corridor_risk_score > 50 else 2,
+            "supplier_hub": "Fujairah / West Africa",
+            "grade": "Bonny Light / Forcados",
+            "transit_days": "12 - 14 Days",
+            "landed_cost": f"${(current_brent + 2.40) * surcharge_multiplier:.2f}/bbl",
+            "compatibility": "96% High Match",
+            "risk_reduction": "-68% Risk Offload",
+            "status": "PRIMARY ALTERNATE"
+        },
+        {
+            "rank": 2 if corridor_risk_score > 50 else 1,
+            "supplier_hub": "Santos Basin (Brazil)",
+            "grade": "Lula / Mero Heavy",
+            "transit_days": "22 - 25 Days",
+            "landed_cost": f"${(current_brent + 1.10) * surcharge_multiplier:.2f}/bbl",
+            "compatibility": "88% Medium Match",
+            "risk_reduction": "-85% Risk Offload",
+            "status": "SECONDARY ROUTE"
+        },
+        {
+            "rank": 3,
+            "supplier_hub": "Ras Tanura (Saudi Arabia)",
+            "grade": "Arab Light / Medium",
+            "transit_days": "4 - 6 Days",
+            "landed_cost": f"${current_brent:.2f}/bbl",
+            "compatibility": "100% Exact Match",
+            "risk_reduction": "0% (Chokepoint Exposed)",
+            "status": "HEDGE ONLY"
+        }
+    ]
+    df = pd.DataFrame(suppliers)
+    return df.sort_values(by="rank").reset_index(drop=True)

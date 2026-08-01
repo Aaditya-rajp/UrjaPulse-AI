@@ -1,8 +1,12 @@
 """
 UrjaPulse AI — Master Streamlit Command Center
-Executes the high-density dark command UI with locked tab-indicator alignment,
-centered column headers, and sanitized HTML table rendering.
+Assembles Telemetry, Scenario Physics, Prophet Forecasting, Geospatial Intelligence,
+and 3-Node Gemini Multi-Agent Advisory into an executive dark command dashboard.
 """
+
+import warnings
+# Silence non-critical Pydantic / framework type warnings in Python 3.13
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 import os
 import textwrap
@@ -38,7 +42,7 @@ st.set_page_config(
 
 load_dotenv()
 
-# --- Custom Styling: High-Density Dark Command Styling & QA Alignment Fixes ---
+# --- Custom Styling: High-Density Dark Command Styling & QA Fixes ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
@@ -87,8 +91,7 @@ st.markdown("""
     .kpi-sub-green { font-size: 10px; color: #10B981; font-weight: 600; }
     .kpi-sub-red { font-size: 10px; color: #EF4444; font-weight: 600; }
 
-    /* --- TAB ALIGNMENT FIX --- */
-    /* Remove tab-list gap to keep BaseWeb indicator offset calculations pixel-perfect */
+    /* Tab Layout & Indicator Line Alignment */
     .stTabs [data-baseweb="tab-list"] { 
         border-bottom: 1px solid #1E222D; 
         padding-bottom: 0px;
@@ -104,7 +107,7 @@ st.markdown("""
         font-size: 11px;
         font-weight: 600;
         padding: 0 16px;
-        margin-right: 6px; /* Replaces gap rule to prevent highlight offset dislocation */
+        margin-right: 6px;
     }
     .stTabs [aria-selected="true"] {
         background-color: #F97316 !important;
@@ -112,7 +115,6 @@ st.markdown("""
         border-color: #F97316 !important;
         box-shadow: 0 0 10px rgba(249, 115, 22, 0.4);
     }
-    /* Lock indicator line color to accent orange */
     .stTabs [data-baseweb="tab-highlight"] {
         background-color: #F97316 !important;
     }
@@ -178,7 +180,7 @@ if "scenario_params" not in st.session_state:
     }
 
 
-# --- Safe Secrets Loader ---
+# --- Safe Secrets Loader (Cloud & Local) ---
 def get_secret(key_name: str, default: str = "") -> str:
     """Fetches secrets from Streamlit Cloud Secrets or local environment variables."""
     try:
@@ -209,11 +211,19 @@ latest_wti = float(crude_df["wti"].iloc[-1]) if not crude_df.empty else 79.85
 latest_volatility = float(crude_df["brent_volatility_7d"].iloc[-1]) if not crude_df.empty else 0.018
 latest_spr_mbbl = config.INDIA_STRATEGIC_RESERVE_MBBL
 
-avg_goldstein = float(gdelt_df["goldstein_scale"].mean()) if not gdelt_df.empty else -5.5
-corridor_risk_score = calculate_corridor_risk_score(avg_goldstein, latest_volatility)
-
+# Read current scenario params
 params = st.session_state.scenario_params
 
+# Dynamic Risk Score tied directly to GDELT signals AND active slider parameters
+avg_goldstein = float(gdelt_df["goldstein_scale"].mean()) if not gdelt_df.empty else -5.5
+corridor_risk_score = calculate_corridor_risk_score(
+    avg_goldstein=avg_goldstein,
+    volatility=latest_volatility,
+    hormuz_pct=params["hormuz_blockade_pct"],
+    red_sea_pct=params["red_sea_reroute_pct"]
+)
+
+# Run Physics Simulation Cascade
 cascade_results = run_disruption_cascade_simulation(
     brent_spot=latest_brent,
     spr_stock_mbbl=latest_spr_mbbl,
@@ -226,6 +236,7 @@ cascade_results = run_disruption_cascade_simulation(
     cape_delay_days=params["cape_delay_days"]
 )
 
+# Generate Reranking Matrix
 reranking_df = generate_supplier_reranking_matrix(
     current_brent=latest_brent,
     freight_surcharge_pct=params["freight_surcharge_pct"],
@@ -303,7 +314,7 @@ def show_board_report_modal():
 
     #### 2. Financial Exposure & Capital Impact
     * **Landed Benchmark Impact:** Projected Brent spot escalation to **${cascade_results['projected_brent_price']:.2f}/bbl** (+${cascade_results['price_delta_usd_bbl']:.2f}/bbl disruption premium).
-    * **Macro Deficit Expansion:** India trade deficit expanding at an estimated **+${cascade_results['daily_macro_loss_million_usd']:.2f}M / day** under current surcharge levels.
+    * **Macro Deficit Expansion:** India trade deficit expanding at an estimated **+${cascade_results['daily_macro_loss_million_usd']:.1f}M / day** under current surcharge levels.
 
     #### 3. Recommended Rerouting & Procurement Mandate
     """)
@@ -363,8 +374,8 @@ with tab1:
         <div style="height: 8px;"></div>
         <div class="metric-panel-alert">
             <div class="kpi-label">SPR Days-of-Cover</div>
-            <div class="kpi-val" style="color: #EF4444;">{cascade_results['spr_days_of_cover_remaining']}d</div>
-            <div class="kpi-sub-red">⚠️ BELOW 14D SAFETY TARGET</div>
+            <div class="kpi-val" style="color: {cascade_results['severity_colors']['spr']};">{cascade_results['spr_days_of_cover_remaining']}d</div>
+            <div class="kpi-sub-red">⚠️ SAFETY TARGET: 14.0d</div>
         </div>
         <div style="height: 8px;"></div>
         <div class="metric-panel">
@@ -374,7 +385,7 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-    # Column 2: Vector Map with Active Risk & Corridor Overlays
+    # Column 2: Vector Map with Active Risk & Non-Truncating Metrics
     with col_center:
         st.markdown(f"""
         <div class="risk-banner">
@@ -383,14 +394,35 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
         
+        # Dynamic map key forces map re-render whenever risk score updates
         m = build_corridor_map(corridor_risk_score=corridor_risk_score)
-        st_folium(m, returned_objects=[], width="100%", height=350, key="tab1_map")
+        st_folium(m, returned_objects=[], width="100%", height=350, key=f"tab1_map_{corridor_risk_score}")
         
-        mc1, mc2, mc3, mc4 = st.columns(4)
-        mc1.metric("VOLUME AT RISK", f"{cascade_results['volume_at_risk_mbpd']} MBPD", f"{cascade_results['pct_total_imports_at_risk']}% Imports")
-        mc2.metric("PRICE IMPACT", f"+${cascade_results['price_delta_usd_bbl']:.2f}/bbl", f"${cascade_results['projected_brent_price']:.2f}")
-        mc3.metric("SPR COVER REM.", f"{cascade_results['spr_days_of_cover_remaining']} Days", f"Critical < 14d")
-        mc4.metric("DAILY TRADE DEFICIT", f"+${cascade_results['daily_macro_loss_million_usd']:.2f}M/day", "INR Pressure")
+        # Compact Sub-Map KPI Grid (Fixes text truncation / overflow)
+        st.markdown(f"""
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px;">
+            <div style="background: #12141A; border: 1px solid #1E222D; padding: 8px 10px; border-radius: 6px;">
+                <div style="font-family: monospace; font-size: 9px; color: #64748B;">VOLUME AT RISK</div>
+                <div style="font-family: monospace; font-size: 16px; font-weight: bold; color: #F8FAFC;">{cascade_results['volume_at_risk_mbpd']} MBPD</div>
+                <div style="font-size: 10px; color: #10B981;">▲ {cascade_results['pct_total_imports_at_risk']}% Imports</div>
+            </div>
+            <div style="background: #12141A; border: 1px solid #1E222D; padding: 8px 10px; border-radius: 6px;">
+                <div style="font-family: monospace; font-size: 9px; color: #64748B;">PRICE IMPACT</div>
+                <div style="font-family: monospace; font-size: 16px; font-weight: bold; color: #F8FAFC;">+${cascade_results['price_delta_usd_bbl']:.2f}/bbl</div>
+                <div style="font-size: 10px; color: #10B981;">Proj: ${cascade_results['projected_brent_price']:.2f}</div>
+            </div>
+            <div style="background: #12141A; border: 1px solid #1E222D; padding: 8px 10px; border-radius: 6px;">
+                <div style="font-family: monospace; font-size: 9px; color: #64748B;">SPR COVER REM.</div>
+                <div style="font-family: monospace; font-size: 16px; font-weight: bold; color: {cascade_results['severity_colors']['spr']};">{cascade_results['spr_days_of_cover_remaining']} Days</div>
+                <div style="font-size: 10px; color: #EF4444;">Target: 14.0d</div>
+            </div>
+            <div style="background: #12141A; border: 1px solid #1E222D; padding: 8px 10px; border-radius: 6px;">
+                <div style="font-family: monospace; font-size: 9px; color: #64748B;">DAILY TRADE DEFICIT</div>
+                <div style="font-family: monospace; font-size: 16px; font-weight: bold; color: #F8FAFC;">+${cascade_results['daily_macro_loss_million_usd']:.1f}M/d</div>
+                <div style="font-size: 10px; color: #10B981;">INR Pressure</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # Column 3: GDELT Feed
     with col_right:
@@ -467,7 +499,7 @@ with tab1:
 # ==========================================
 with tab2:
     st.subheader("🎛️ SCENARIO IMPACT SIMULATOR (SECTION 4 ENGINE)")
-    st.caption("Adjust disruption vectors to simulate cascading supply impact.")
+    st.caption("Adjust disruption vectors to simulate cascading supply impact across all tabs.")
 
     sc_col1, sc_col2, sc_col3 = st.columns(3)
     with sc_col1:
@@ -511,7 +543,7 @@ with tab2:
         st.markdown(f"""
         <div style="background: #12141A; border: 1px solid #1E222D; border-top: 3px solid #10B981; padding: 12px; border-radius: 6px; font-size: 11px;">
             <b style="color: #10B981; font-family: monospace;">4. MACRO TRADE BALANCE</b><br/>
-            Daily trade deficit expansion: +${cascade_results['daily_macro_loss_million_usd']:.2f}M/day under current surcharges.
+            Daily trade deficit expansion: +${cascade_results['daily_macro_loss_million_usd']:.1f}M/day under current surcharges.
         </div>
         """, unsafe_allow_html=True)
 
@@ -521,7 +553,7 @@ with tab2:
     with sim_left:
         st.markdown("##### 🗺️ Simulated Corridor Vectors")
         m_sim = build_corridor_map(corridor_risk_score=corridor_risk_score)
-        st_folium(m_sim, returned_objects=[], width="100%", height=380, key="tab2_map")
+        st_folium(m_sim, returned_objects=[], width="100%", height=380, key=f"tab2_map_{corridor_risk_score}")
 
     with sim_right:
         st.markdown("##### 📊 Dynamic Reranking Matrix")

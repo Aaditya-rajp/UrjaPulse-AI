@@ -42,7 +42,7 @@ st.set_page_config(
 
 load_dotenv()
 
-# --- Custom Styling: High-Density Dark Command Styling & QA Fixes ---
+# --- Custom Styling: High-Density Dark Command Styling ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
@@ -236,7 +236,7 @@ cascade_results = run_disruption_cascade_simulation(
     cape_delay_days=params["cape_delay_days"]
 )
 
-# Generate Reranking Matrix
+# Generate Reranking Matrix with route-specific risk scores
 reranking_df = generate_supplier_reranking_matrix(
     current_brent=latest_brent,
     freight_surcharge_pct=params["freight_surcharge_pct"],
@@ -245,7 +245,7 @@ reranking_df = generate_supplier_reranking_matrix(
 
 
 def render_html_reranking_table(df: pd.DataFrame) -> str:
-    """Renders a whitespace-sanitized HTML table string with neon badge styling."""
+    """Renders a whitespace-sanitized HTML table string with route-specific risk scores."""
     rows_html = ""
     for _, row in df.iterrows():
         status = row["status"]
@@ -256,6 +256,8 @@ def render_html_reranking_table(df: pd.DataFrame) -> str:
         else:
             badge_class = "badge-hedge"
 
+        risk_score_val = row.get("risk_score", "N/A")
+
         rows_html += f"""<tr>
             <td style="color: #F97316; font-weight: bold;">{row['rank']}</td>
             <td><b>{row['supplier_hub']}</b></td>
@@ -263,6 +265,7 @@ def render_html_reranking_table(df: pd.DataFrame) -> str:
             <td>{row['transit_days']}</td>
             <td style="color: #F8FAFC; font-weight: bold;">{row['landed_cost']}</td>
             <td>{row['compatibility']}</td>
+            <td style="color: #F97316; font-weight: bold;">{risk_score_val}</td>
             <td style="color: #10B981; font-weight: bold;">{row['risk_reduction']}</td>
             <td><span class="{badge_class}">{status}</span></td>
         </tr>"""
@@ -276,6 +279,7 @@ def render_html_reranking_table(df: pd.DataFrame) -> str:
                 <th>Transit Window</th>
                 <th>Landed Cost</th>
                 <th>Grade Match</th>
+                <th>Route Risk Score</th>
                 <th>Risk Reduction</th>
                 <th>Status</th>
             </tr>
@@ -322,7 +326,7 @@ def show_board_report_modal():
     top_suppliers = reranking_df.head(3).to_dict(orient="records")
     for idx, sup in enumerate(top_suppliers):
         st.markdown(f"**Action {idx+1}: Secure Allocation from {sup['supplier_hub']}**")
-        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;*Landed Cost:* `{sup['landed_cost']}` | *Transit Window:* `{sup['transit_days']}` | *Risk Offload:* `{sup['risk_reduction']}`")
+        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;*Landed Cost:* `{sup['landed_cost']}` | *Route Risk:* `{sup['risk_score']}` | *Risk Offload:* `{sup['risk_reduction']}`")
 
     st.markdown("---")
     if st.button("Acknowledge & Close Briefing", width="stretch"):
@@ -398,7 +402,7 @@ with tab1:
         m = build_corridor_map(corridor_risk_score=corridor_risk_score)
         st_folium(m, returned_objects=[], width="100%", height=350, key=f"tab1_map_{corridor_risk_score}")
         
-        # Compact Sub-Map KPI Grid (Fixes text truncation / overflow)
+        # Compact Sub-Map KPI Grid (Fixes text truncation)
         st.markdown(f"""
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px;">
             <div style="background: #12141A; border: 1px solid #1E222D; padding: 8px 10px; border-radius: 6px;">

@@ -5,7 +5,6 @@ and 3-Node Gemini Multi-Agent Advisory into an executive dark command dashboard.
 """
 
 import warnings
-# Silence non-critical Pydantic / framework type warnings in Python 3.13
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 import os
@@ -24,7 +23,7 @@ from data.gdelt_client import fetch_geopolitical_signals
 
 # Import Analytical & Physics Modules
 from modules.scenario_engine import (
-    calculate_corridor_risk_score,
+    calculate_corridor_risks,
     run_disruption_cascade_simulation,
     generate_supplier_reranking_matrix
 )
@@ -42,7 +41,7 @@ st.set_page_config(
 
 load_dotenv()
 
-# --- Custom Styling: High-Density Dark Command Styling ---
+# --- Custom Styling ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
@@ -91,7 +90,7 @@ st.markdown("""
     .kpi-sub-green { font-size: 10px; color: #10B981; font-weight: 600; }
     .kpi-sub-red { font-size: 10px; color: #EF4444; font-weight: 600; }
 
-    /* Tab Layout & Indicator Line Alignment */
+    /* Tab Layout Alignment */
     .stTabs [data-baseweb="tab-list"] { 
         border-bottom: 1px solid #1E222D; 
         padding-bottom: 0px;
@@ -180,9 +179,7 @@ if "scenario_params" not in st.session_state:
     }
 
 
-# --- Safe Secrets Loader (Cloud & Local) ---
 def get_secret(key_name: str, default: str = "") -> str:
-    """Fetches secrets from Streamlit Cloud Secrets or local environment variables."""
     try:
         if hasattr(st, "secrets") and key_name in st.secrets:
             return str(st.secrets[key_name]).strip()
@@ -195,7 +192,6 @@ eia_api_key = get_secret("EIA_API_KEY")
 gemini_api_key = get_secret("GEMINI_API_KEY")
 
 
-# --- Telemetry Data Ingestion ---
 @st.cache_data(ttl=900, show_spinner=False)
 def load_telemetry_data(eia_key: str):
     crude_data = fetch_crude_prices(api_key=eia_key)
@@ -211,19 +207,20 @@ latest_wti = float(crude_df["wti"].iloc[-1]) if not crude_df.empty else 79.85
 latest_volatility = float(crude_df["brent_volatility_7d"].iloc[-1]) if not crude_df.empty else 0.018
 latest_spr_mbbl = config.INDIA_STRATEGIC_RESERVE_MBBL
 
-# Read current scenario params
 params = st.session_state.scenario_params
-
-# Dynamic Risk Score tied directly to GDELT signals AND active slider parameters
 avg_goldstein = float(gdelt_df["goldstein_scale"].mean()) if not gdelt_df.empty else -5.5
-corridor_risk_score = calculate_corridor_risk_score(
+
+# Calculate independent route risk dictionary
+risk_dict = calculate_corridor_risks(
     avg_goldstein=avg_goldstein,
     volatility=latest_volatility,
     hormuz_pct=params["hormuz_blockade_pct"],
     red_sea_pct=params["red_sea_reroute_pct"]
 )
 
-# Run Physics Simulation Cascade
+active_corridor_name = risk_dict["top_corridor"]
+corridor_risk_score = risk_dict["top_score"]
+
 cascade_results = run_disruption_cascade_simulation(
     brent_spot=latest_brent,
     spr_stock_mbbl=latest_spr_mbbl,
@@ -236,16 +233,16 @@ cascade_results = run_disruption_cascade_simulation(
     cape_delay_days=params["cape_delay_days"]
 )
 
-# Generate Reranking Matrix with route-specific risk scores
 reranking_df = generate_supplier_reranking_matrix(
     current_brent=latest_brent,
     freight_surcharge_pct=params["freight_surcharge_pct"],
-    corridor_risk_score=corridor_risk_score
+    hormuz_risk=risk_dict["hormuz_risk"],
+    red_sea_risk=risk_dict["red_sea_risk"],
+    cape_risk=risk_dict["cape_risk"]
 )
 
 
 def render_html_reranking_table(df: pd.DataFrame) -> str:
-    """Renders a whitespace-sanitized HTML table string with route-specific risk scores."""
     rows_html = ""
     for _, row in df.iterrows():
         status = row["status"]
@@ -292,14 +289,12 @@ def render_html_reranking_table(df: pd.DataFrame) -> str:
 
 
 def display_html_table(html_content: str):
-    """Renders HTML cleanly, preventing markdown string interpretation errors."""
     if hasattr(st, "html"):
         st.html(html_content)
     else:
         st.markdown(html_content, unsafe_allow_html=True)
 
 
-# --- Executive Board Briefing Dialog ---
 @st.dialog("🏛️ EXECUTIVE BOARD BRIEFING — STRATEGIC MANDATE")
 def show_board_report_modal():
     st.markdown(f"""
@@ -312,7 +307,7 @@ def show_board_report_modal():
 
     st.markdown(f"""
     #### 1. Executive Situation Assessment
-    * **Corridor Friction Status:** Active Maritime Bottleneck identified in the **Strait of Hormuz** (Risk Index: **{corridor_risk_score}/100**).
+    * **Corridor Friction Status:** Active Maritime Bottleneck identified in **{active_corridor_name}** (Risk Index: **{corridor_risk_score}/100**).
     * **Supply Vulnerability:** **{cascade_results['volume_at_risk_mbpd']} MBPD** ({cascade_results['pct_total_imports_at_risk']}% of national daily import throughput) impacted.
     * **Strategic Petroleum Reserve Cover:** Domestic buffer stands at **{cascade_results['spr_days_of_cover_remaining']} Days** against the 14-day statutory safety threshold.
 
@@ -333,7 +328,6 @@ def show_board_report_modal():
         st.rerun()
 
 
-# --- Header Bar (Vertically Centered Alignment Fix) ---
 h_col1, h_col2 = st.columns([4, 1], vertical_alignment="center")
 with h_col1:
     st.title("🛢️ UrjaPulse AI")
@@ -345,7 +339,6 @@ with h_col2:
 st.markdown("---")
 
 
-# --- 4 Primary Navigation Tabs ---
 tab1, tab2, tab3, tab4 = st.tabs([
     "🖥️ Command Dashboard",
     "🎛️ Scenario Simulator",
@@ -355,12 +348,11 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 
 # ==========================================
-# TAB 1: COMMAND DASHBOARD (3-Column Grid)
+# TAB 1: COMMAND DASHBOARD
 # ==========================================
 with tab1:
     col_left, col_center, col_right = st.columns([3, 6, 3])
     
-    # Column 1: Benchmarks
     with col_left:
         st.markdown("##### 📊 Telemetry Benchmarks")
         st.markdown(f"""
@@ -389,20 +381,21 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-    # Column 2: Vector Map with Active Risk & Non-Truncating Metrics
     with col_center:
         st.markdown(f"""
         <div class="risk-banner">
-            <span>⚡ ACTIVE RISK: STRAIT OF HORMUZ [SCORE: {corridor_risk_score}]</span>
+            <span>⚡ ACTIVE RISK: {active_corridor_name} [SCORE: {corridor_risk_score}]</span>
             <span style="color: #64748B; font-weight: normal;">MONITORED CORRIDORS: 4</span>
         </div>
         """, unsafe_allow_html=True)
         
-        # Dynamic map key forces map re-render whenever risk score updates
-        m = build_corridor_map(corridor_risk_score=corridor_risk_score)
-        st_folium(m, returned_objects=[], width="100%", height=350, key=f"tab1_map_{corridor_risk_score}")
+        m = build_corridor_map(
+            hormuz_risk=risk_dict["hormuz_risk"],
+            red_sea_risk=risk_dict["red_sea_risk"],
+            cape_risk=risk_dict["cape_risk"]
+        )
+        st_folium(m, returned_objects=[], width="100%", height=350, key=f"tab1_map_{risk_dict['hormuz_risk']}_{risk_dict['red_sea_risk']}")
         
-        # Compact Sub-Map KPI Grid (Fixes text truncation)
         st.markdown(f"""
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px;">
             <div style="background: #12141A; border: 1px solid #1E222D; padding: 8px 10px; border-radius: 6px;">
@@ -428,7 +421,6 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-    # Column 3: GDELT Feed
     with col_right:
         st.markdown("##### 📰 GDELT Geopolitical Feed")
         search_query = st.text_input("Search events...", placeholder="Filter headlines...", label_visibility="collapsed")
@@ -452,7 +444,6 @@ with tab1:
 
     st.markdown("---")
 
-    # Single-Location Multi-Agent Advisory
     st.markdown("##### 🤖 Gemini 3-Node Multi-Agent Advisory System")
     
     top_suppliers_list = reranking_df.to_dict(orient="records")
@@ -518,7 +509,6 @@ with tab2:
 
     st.markdown("---")
 
-    # Dynamic Severity Step Cards
     sev_colors = cascade_results["severity_colors"]
     step1, step2, step3, step4 = st.columns(4)
     
@@ -526,7 +516,7 @@ with tab2:
         st.markdown(f"""
         <div style="background: #12141A; border: 1px solid #1E222D; border-top: 3px solid #F97316; padding: 12px; border-radius: 6px; font-size: 11px;">
             <b style="color: #F97316; font-family: monospace;">1. CHOKEPOINT TRANSIT</b><br/>
-            Hormuz transit bottlenecked. {params['hormuz_blockade_pct']}% capacity blockade affecting {cascade_results['volume_at_risk_mbpd']} MBPD.
+            Hormuz blockade {params['hormuz_blockade_pct']}%, Red Sea reroute {params['red_sea_reroute_pct']}%. Total volume at risk: {cascade_results['volume_at_risk_mbpd']} MBPD.
         </div>
         """, unsafe_allow_html=True)
     with step2:
@@ -556,8 +546,12 @@ with tab2:
     sim_left, sim_right = st.columns([1, 1])
     with sim_left:
         st.markdown("##### 🗺️ Simulated Corridor Vectors")
-        m_sim = build_corridor_map(corridor_risk_score=corridor_risk_score)
-        st_folium(m_sim, returned_objects=[], width="100%", height=380, key=f"tab2_map_{corridor_risk_score}")
+        m_sim = build_corridor_map(
+            hormuz_risk=risk_dict["hormuz_risk"],
+            red_sea_risk=risk_dict["red_sea_risk"],
+            cape_risk=risk_dict["cape_risk"]
+        )
+        st_folium(m_sim, returned_objects=[], width="100%", height=380, key=f"tab2_map_{risk_dict['hormuz_risk']}_{risk_dict['red_sea_risk']}")
 
     with sim_right:
         st.markdown("##### 📊 Dynamic Reranking Matrix")

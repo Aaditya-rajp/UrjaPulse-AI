@@ -1,30 +1,44 @@
 """
 Scenario Engine — Physics & Mathematical Simulation Engine
-Calculates dynamic risk scores, disruption cascades, SPR cover, and supplier reranking.
+Calculates independent chokepoint risk scores, disruption cascades, SPR cover, and supplier reranking.
 """
 
 import pandas as pd
 
 
-def calculate_corridor_risk_score(
+def calculate_corridor_risks(
     avg_goldstein: float, 
     volatility: float, 
     hormuz_pct: float = 0.0, 
     red_sea_pct: float = 0.0
-) -> float:
+) -> dict:
     """
-    Calculates dynamic corridor risk score (0-100) combining GDELT conflict scale,
-    price volatility, and active scenario blockade sliders.
+    Calculates independent risk scores (0-100) for Hormuz, Red Sea, and Cape routes
+    based on their respective slider controls.
     """
-    # Base GDELT risk: Goldstein scale ranges from -10 (conflict) to +10 (cooperation)
-    base_risk = max(0.0, min(100.0, (5.0 - avg_goldstein) * 5.0))
-    volatility_boost = min(20.0, volatility * 500.0)
-    
-    # Dynamic scenario slider impact
-    scenario_boost = (hormuz_pct * 0.40) + (red_sea_pct * 0.20)
-    
-    total_score = base_risk + volatility_boost + scenario_boost
-    return round(max(5.0, min(99.9, total_score)), 1)
+    base_risk = max(0.0, min(100.0, (5.0 - avg_goldstein) * 4.0))
+    volatility_boost = min(15.0, volatility * 400.0)
+
+    # Independent risk per route
+    hormuz_risk = round(max(5.0, min(99.9, base_risk + volatility_boost + (hormuz_pct * 0.45))), 1)
+    red_sea_risk = round(max(5.0, min(99.9, base_risk + volatility_boost + (red_sea_pct * 0.35))), 1)
+    cape_risk = round(max(5.0, min(99.9, (base_risk + volatility_boost) * 0.20)), 1)
+
+    # Dynamically pick dominant threat corridor
+    if hormuz_risk >= red_sea_risk:
+        top_corridor = "STRAIT OF HORMUZ"
+        top_score = hormuz_risk
+    else:
+        top_corridor = "BAB-EL-MANDEB / RED SEA"
+        top_score = red_sea_risk
+
+    return {
+        "hormuz_risk": hormuz_risk,
+        "red_sea_risk": red_sea_risk,
+        "cape_risk": cape_risk,
+        "top_corridor": top_corridor,
+        "top_score": top_score
+    }
 
 
 def run_disruption_cascade_simulation(
@@ -50,7 +64,7 @@ def run_disruption_cascade_simulation(
     # 2. Dynamic SPR Days of Cover
     net_daily_deficit = max(0.05, volume_at_risk - spr_drawdown_mbpd)
     if volume_at_risk <= 0:
-        spr_days = 74.0  # Baseline static buffer
+        spr_days = 74.0
     else:
         spr_days = spr_stock_mbbl / net_daily_deficit
     spr_days_remaining = round(max(1.0, min(90.0, spr_days)), 1)
@@ -84,37 +98,34 @@ def run_disruption_cascade_simulation(
 def generate_supplier_reranking_matrix(
     current_brent: float,
     freight_surcharge_pct: float,
-    corridor_risk_score: float
+    hormuz_risk: float,
+    red_sea_risk: float,
+    cape_risk: float
 ) -> pd.DataFrame:
     """Generates dynamic supplier reranking with individual route-level risk scores."""
     surcharge_multiplier = 1.0 + (freight_surcharge_pct / 100.0)
     
-    # Calculate route-specific risk scores based on physical chokepoint exposure
-    ras_tanura_risk = round(corridor_risk_score, 1)                             # 100% exposed to Hormuz
-    fujairah_risk = round(max(10.0, corridor_risk_score * 0.35), 1)            # Partially bypasses Hormuz (-65% risk)
-    santos_risk = round(max(5.0, corridor_risk_score * 0.15), 1)              # Bypasses Middle East completely (-85% risk)
-
     suppliers = [
         {
-            "rank": 1 if corridor_risk_score > 50 else 2,
+            "rank": 1 if hormuz_risk > 50 else 2,
             "supplier_hub": "Fujairah / West Africa",
             "grade": "Bonny Light / Forcados",
             "transit_days": "12 - 14 Days",
             "landed_cost": f"${(current_brent + 2.40) * surcharge_multiplier:.2f}/bbl",
             "compatibility": "96% High Match",
-            "risk_score": f"{fujairah_risk} / 100",
-            "risk_reduction": f"-{round(100 - (fujairah_risk / max(1.0, ras_tanura_risk) * 100))}% Offload",
+            "risk_score": f"{red_sea_risk} / 100",
+            "risk_reduction": f"-{round(100 - (red_sea_risk / max(1.0, hormuz_risk) * 100))}% Offload",
             "status": "PRIMARY ALTERNATE"
         },
         {
-            "rank": 2 if corridor_risk_score > 50 else 1,
+            "rank": 2 if hormuz_risk > 50 else 1,
             "supplier_hub": "Santos Basin (Brazil)",
             "grade": "Lula / Mero Heavy",
             "transit_days": "22 - 25 Days",
             "landed_cost": f"${(current_brent + 1.10) * surcharge_multiplier:.2f}/bbl",
             "compatibility": "88% Medium Match",
-            "risk_score": f"{santos_risk} / 100",
-            "risk_reduction": f"-{round(100 - (santos_risk / max(1.0, ras_tanura_risk) * 100))}% Offload",
+            "risk_score": f"{cape_risk} / 100",
+            "risk_reduction": f"-{round(100 - (cape_risk / max(1.0, hormuz_risk) * 100))}% Offload",
             "status": "SECONDARY ROUTE"
         },
         {
@@ -124,7 +135,7 @@ def generate_supplier_reranking_matrix(
             "transit_days": "4 - 6 Days",
             "landed_cost": f"${current_brent:.2f}/bbl",
             "compatibility": "100% Exact Match",
-            "risk_score": f"{ras_tanura_risk} / 100",
+            "risk_score": f"{hormuz_risk} / 100",
             "risk_reduction": "0% (Fully Exposed)",
             "status": "HEDGE ONLY"
         }

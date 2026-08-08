@@ -1,7 +1,6 @@
 """
 Geospatial Intelligence Module — Folium Dark Vector Map Engine
-Renders executive dark vector maps with explicit route labels, 
-glowing HTML DivIcons, midpoint vector callouts, and interactive legend overlays.
+Renders dark vector maps with independent route risk scores and mid-line badges.
 """
 
 import folium
@@ -9,20 +8,15 @@ from folium import DivIcon
 
 
 def _get_risk_color(score: float) -> str:
-    """Returns hexadecimal color code based on numerical risk score."""
     if score >= 60.0:
-        return "#EF4444"  # Critical Red
+        return "#EF4444"
     elif score >= 35.0:
-        return "#F97316"  # Warning Orange
-    return "#10B981"      # Safe Emerald Green
+        return "#F97316"
+    return "#10B981"
 
 
-def build_corridor_map(corridor_risk_score: float) -> folium.Map:
-    """
-    Builds an executive-grade dark vector map showing global supply routes, 
-    route-level text labels, and an integrated map legend.
-    """
-    # Base Map centered on Indian Ocean trade lanes
+def build_corridor_map(hormuz_risk: float, red_sea_risk: float, cape_risk: float) -> folium.Map:
+    """Builds interactive dark map taking independent risk scores for every route."""
     m = folium.Map(
         location=[19.0, 65.0],
         zoom_start=4,
@@ -31,27 +25,16 @@ def build_corridor_map(corridor_risk_score: float) -> folium.Map:
         control_scale=True
     )
 
-    # -------------------------------------------------------------
-    # 1. ROUTE-SPECIFIC RISK COMPUTATION
-    # -------------------------------------------------------------
-    hormuz_risk = round(corridor_risk_score, 1)
     hormuz_color = _get_risk_color(hormuz_risk)
-
-    red_sea_risk = round(max(10.0, corridor_risk_score * 0.45), 1)
     red_sea_color = _get_risk_color(red_sea_risk)
-
-    cape_risk = round(max(5.0, corridor_risk_score * 0.15), 1)
     cape_color = _get_risk_color(cape_risk)
 
-    # -------------------------------------------------------------
-    # 2. SHIPPING LANES / POLY LINES WITH MIDPOINT LABELS
-    # -------------------------------------------------------------
     routes = [
         {
             "id": "LANE 01",
             "name": "Strait of Hormuz Direct Route",
             "coords": [[26.5, 56.2], [23.5, 62.0], [22.4, 69.7]],
-            "label_pos": [24.5, 61.0],  # Midpoint position for floating label
+            "label_pos": [24.5, 61.0],
             "risk": hormuz_risk,
             "color": hormuz_color,
             "dash": "6, 8" if hormuz_risk > 50 else None
@@ -60,7 +43,7 @@ def build_corridor_map(corridor_risk_score: float) -> folium.Map:
             "id": "LANE 02",
             "name": "Red Sea / Bab-el-Mandeb Route",
             "coords": [[12.6, 43.3], [14.0, 55.0], [22.4, 69.7]],
-            "label_pos": [14.8, 54.0],  # Midpoint position
+            "label_pos": [14.8, 54.0],
             "risk": red_sea_risk,
             "color": red_sea_color,
             "dash": "4, 6" if red_sea_risk > 50 else None
@@ -69,16 +52,14 @@ def build_corridor_map(corridor_risk_score: float) -> folium.Map:
             "id": "LANE 03",
             "name": "Cape of Good Hope / Atlantic Route",
             "coords": [[4.3, 6.9], [-5.0, 20.0], [-15.0, 45.0], [5.0, 65.0], [12.9, 74.8]],
-            "label_pos": [2.0, 58.0],   # Midpoint position
+            "label_pos": [2.0, 58.0],
             "risk": cape_risk,
             "color": cape_color,
             "dash": None
         }
     ]
 
-    # Draw Polylines and Midpoint Permanent Labels
     for r in routes:
-        # Draw Line
         folium.PolyLine(
             locations=r["coords"],
             color=r["color"],
@@ -88,7 +69,6 @@ def build_corridor_map(corridor_risk_score: float) -> folium.Map:
             tooltip=f"<b>{r['id']}: {r['name']}</b><br/>Risk Index: {r['risk']}/100"
         ).add_to(m)
 
-        # Permanent Text Badge Placed Directly on Map Route Midpoint
         label_html = f"""
         <div style="
             background: #12141A;
@@ -111,9 +91,6 @@ def build_corridor_map(corridor_risk_score: float) -> folium.Map:
             icon=DivIcon(icon_size=(160, 20), icon_anchor=(80, 10), html=label_html)
         ).add_to(m)
 
-    # -------------------------------------------------------------
-    # 3. CHOKEPOINTS & SUPPLY HUBS (NODES)
-    # -------------------------------------------------------------
     hubs = [
         {
             "name": "Strait of Hormuz",
@@ -178,9 +155,6 @@ def build_corridor_map(corridor_risk_score: float) -> folium.Map:
             tooltip=f"{hub['name']} (Risk: {hub['risk']})"
         ).add_to(m)
 
-    # -------------------------------------------------------------
-    # 4. DOMESTIC REFINERY ARRIVAL NODES
-    # -------------------------------------------------------------
     refineries = [
         {"name": "Vadinar Refinery", "coords": [22.4, 69.7], "cap": "20.0 MTPA"},
         {"name": "Panipat Refinery", "coords": [29.4, 76.9], "cap": "15.0 MTPA"},
@@ -204,9 +178,6 @@ def build_corridor_map(corridor_risk_score: float) -> folium.Map:
             tooltip=f"Refinery Hub: {ref['name']} ({ref['cap']})"
         ).add_to(m)
 
-    # -------------------------------------------------------------
-    # 5. FLOATING MAP LEGEND OVERLAY
-    # -------------------------------------------------------------
     legend_html = f"""
     <div style="
         position: fixed;
